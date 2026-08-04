@@ -399,3 +399,104 @@ PartnersService отвечает за запись (Command): создание, 
 RestaurantsHandbooksService отвечает за чтение (Query): быстрая выдача каталога для мобильных клиентов. На этот сервис приходится основная read-нагрузка.
 
 Синхронизация между ними происходит асинхронно через Kafka: как только PartnersService подтверждает изменение (например, одобрение нового меню), он публикует событие MenuUpdated. RestaurantsHandbooksService читает это событие и обновляет свою read-модель (инвалидирует кэш в Redis или обновляет денормализованные таблицы). Благодаря этому чтение и запись масштабируются независимо, а фронтенд получает ответы с минимальной задержкой.
+
+Diagram code:  
+@startuml FoodDelivery_Architecture
+!theme plain
+skinparam componentStyle rectangle
+skinparam linetype ortho
+skinparam nodesep 40
+skinparam ranksep 50
+
+title Схема взаимодействия сервисов — Доставка еды
+
+actor "Клиент\n(Mobile App)" as Client
+actor "Курьер\n(Mobile App)" as Courier
+actor "Партнёр\n(Portal)" as Partner
+actor "Модератор" as Moderator
+
+rectangle "API Gateway" as Gateway #LightBlue
+
+cloud "Внешние системы" {
+  [Платёжные\nпровайдеры] as PayProv
+  [APNs / FCM] as Push
+  [Email SMTP] as Email
+}
+
+rectangle "Event Bus" {
+  queue "Kafka\n(order-events,\npayment-events,\ncourier-events,\nmenu-events...)" as Kafka
+}
+
+' Группы сервисов
+package "Каталог и партнёры" {
+  [RestaurantsHandbooksService\n(REST)] as Catalog
+  [PartnersService\n(REST)] as Partners
+}
+
+package "Основной поток заказа" {
+  [OrdersService\n(REST + Kafka)] as Orders
+  [PaymentService\n(REST + Kafka)] as Payments
+  [CouriersService\n(REST + Kafka)] as Couriers
+  [CalculatorService\n(REST)] as Calc
+  [PromoDiscountsService\n(REST)] as Promo
+}
+
+package "Realtime" {
+  [ChatsService\n(WebSocket)] as Chats
+  [CourierGeoService\n(WebSocket)] as Geo
+}
+
+package "Вспомогательные" {
+  [NotificationsService\n(Kafka → Push/Email)] as Notif
+  [MotivationService\n(REST + Kafka)] as Motivation
+}
+
+' Клиенты → Gateway
+Client --> Gateway : REST
+Courier --> Gateway : REST / WebSocket
+Partner --> Gateway : REST
+Moderator --> Gateway : REST
+
+' Gateway → сервисы (REST)
+Gateway --> Catalog : REST
+Gateway --> Orders : REST
+Gateway --> Couriers : REST
+Gateway --> Partners : REST
+Gateway --> Payments : REST
+Gateway --> Calc : REST
+Gateway --> Promo : REST
+Gateway --> Motivation : REST
+Gateway --> Chats : WebSocket
+Gateway --> Geo : WebSocket
+
+' Kafka взаимодействия (основные)
+Orders --> Kafka : publish OrderCreated / OrderUpdated
+Payments --> Kafka : publish PaymentSucceeded / Failed
+Couriers --> Kafka : publish CourierAssigned / Unavailable
+Partners --> Kafka : publish MenuUpdated / PartnerApproved
+Kafka --> Notif : consume → push/email
+Kafka --> Orders : consume (статусы)
+Kafka --> Couriers : consume
+Kafka --> Catalog : consume (обновление read-модели)
+Kafka --> Motivation : consume
+Kafka --> Geo : consume
+Kafka --> Chats : consume
+
+' Внешние
+Payments --> PayProv : REST (sync)
+Notif --> Push : REST/API
+Notif --> Email : SMTP/API
+
+' CQRS-связь
+Partners -[dashed]-> Catalog : через Kafka\n(MenuUpdated)
+
+note right of Kafka
+  Основные топики:
+  • order-events
+  • payment-events
+  • courier-events
+  • menu-events
+  • notification-events
+end note
+
+@enduml
