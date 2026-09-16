@@ -1,0 +1,28 @@
+@startuml C4_Context
+!theme plain
+skinparam shadowing false
+skinparam linetype ortho
+title C4 Context — мессенджер
+
+actor "Пользователь\n(mobile / web / desktop)" as User
+actor "Админ группы" as Admin
+
+rectangle "Мессенджер" as Sys #E8F4FD
+
+rectangle "Внешние системы" {
+  [APNs / FCM] as Push
+  [SMS / Email OTP] as OTP
+  [Object Storage + CDN] as CDN
+}
+
+User --> Sys : сообщения, чаты,\nмедиа, presence
+Admin --> Sys : роли, инвайты
+Sys --> Push : push офлайн
+Sys --> OTP : код входа
+Sys --> CDN : фото и файлы
+
+legend bottom
+  Система — аналог Telegram (MVP).
+  Звонки, каналы и E2EE вне scope.
+endlegend
+@enduml

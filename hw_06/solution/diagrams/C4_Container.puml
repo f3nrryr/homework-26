@@ -1,0 +1,58 @@
+@startuml C4_Container
+!theme plain
+skinparam shadowing false
+title C4 Container — мессенджер
+legend top
+  сплошная линия = sync (REST / gRPC / WS)
+  пунктир = async (Kafka / RabbitMQ)
+endlegend
+
+actor Client
+
+rectangle "Edge" {
+  [API Gateway\nREST + WebSocket] as GW
+}
+
+rectangle "Сервисы" {
+  [AuthService] as Auth
+  [UsersService] as Users
+  [ChatsService] as Chats
+  [MessagesService] as Msg
+  [MediaService] as Media
+  [PresenceService] as Pres
+  [PushService] as Push
+}
+
+rectangle "Данные" {
+  database "PostgreSQL\nusers / chats / auth" as PG
+  database "Cassandra\nmessages / inbox" as CAS
+  database "Redis\npresence / cache" as Redis
+  queue "Kafka" as Kafka
+  queue "RabbitMQ\npush retry" as RQ
+  cloud "S3 + CDN" as S3
+}
+
+Client --> GW : REST / WSS
+GW --> Auth : gRPC
+GW --> Users : gRPC
+GW --> Chats : gRPC
+GW --> Msg : gRPC
+GW --> Media : gRPC
+GW --> Pres : gRPC / WS
+
+Auth --> PG
+Users --> PG
+Chats --> PG
+Msg --> CAS
+Pres --> Redis
+Chats --> Redis
+Media --> S3 : signed URL
+
+Msg -[#blue,dashed]-> Kafka : MessageSent
+Chats -[#blue,dashed]-> Kafka : MemberChanged
+Kafka -[#blue,dashed]-> Push
+Kafka -[#blue,dashed]-> Chats : last_message
+Push -[#blue,dashed]-> RQ
+RQ --> Push : retry
+Push --> [APNs / FCM] : HTTPS
+@enduml
