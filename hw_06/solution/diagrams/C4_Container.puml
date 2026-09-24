@@ -1,0 +1,64 @@
+@startuml C4_Container
+!theme plain
+skinparam shadowing false
+title C4 Container — мессенджер
+legend top
+  сплошная = sync (REST / gRPC / WS)
+  пунктир = async (Kafka / Redis pub-sub / RabbitMQ)
+endlegend
+
+actor Client
+
+rectangle "Edge" {
+  [API Gateway\nREST + WebSocket] as GW
+}
+
+rectangle "Сервисы" {
+  [AuthService] as Auth
+  [UsersService] as Users
+  [ChatsService] as Chats
+  [MessagesService] as Msg
+  [MediaService] as Media
+  [PresenceService] as Pres
+  [PushService] as Push
+}
+
+rectangle "Данные" {
+  database "PostgreSQL\nusers / chats / auth / devices" as PG
+  database "Cassandra\nmessages_by_chat\ninbox_by_user" as CAS
+  database "Redis\nws-sessions / presence\nunread / cache" as Redis
+  queue "Kafka" as Kafka
+  queue "RabbitMQ\npush retry" as RQ
+  cloud "S3 + CDN" as S3
+}
+
+Client --> GW : REST / WSS
+GW --> Auth : gRPC
+GW --> Users : gRPC
+GW --> Chats : gRPC
+GW --> Msg : gRPC
+GW --> Media : gRPC
+GW --> Pres : gRPC
+GW --> Redis : REGISTER\nuser_id → {gw_node, device_id}
+
+Auth --> PG
+Users --> PG
+Chats --> PG
+Msg --> CAS
+Pres --> Redis
+Chats --> Redis
+Media --> S3 : signed URL
+
+Msg -[#blue,dashed]-> Kafka : MessageSent
+Chats -[#blue,dashed]-> Kafka : MemberChanged
+Kafka -[#blue,dashed]-> Pres : consume
+Pres --> Redis : GET sessions[user_id]
+Pres -[#blue,dashed]-> Redis : PUBLISH gw:{node}
+Redis -[#blue,dashed]-> GW : pub-sub
+GW --> Client : WS message.created
+Kafka -[#blue,dashed]-> Push
+Kafka -[#blue,dashed]-> Chats : last_message
+Push -[#blue,dashed]-> RQ
+RQ --> Push : retry
+Push --> [APNs / FCM] : HTTPS
+@enduml
