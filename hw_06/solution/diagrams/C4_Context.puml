@@ -1,28 +1,41 @@
-@startuml C4_Context
+@startuml Sequence_SendMessage
 !theme plain
 skinparam shadowing false
-skinparam linetype ortho
-title C4 Context — мессенджер
+title Отправка и доставка (с маршрутизацией WS)
+actor Sender
+participant GW1 as "Gateway-1\n(отправитель)"
+participant Msg as "Messages"
+participant CAS as "Cassandra"
+participant Kafka
+participant Pres as "Presence"
+database Redis
+participant GW2 as "Gateway-2\n(получатель)"
+actor Peer as "Получатель"
+participant Push as "Push"
 
-actor "Пользователь\n(mobile / web / desktop)" as User
-actor "Админ группы" as Admin
+Sender -> GW1 : POST /messages\nIdempotency-Key
+GW1 -> Msg : gRPC Send
+Msg -> CAS : INSERT messages_by_chat
+Msg -> Kafka : MessageSent key=chat_id
+Msg --> GW1 : 201 messageId
+GW1 --> Sender : 201
 
-rectangle "Мессенджер" as Sys #E8F4FD
+Kafka -> Pres : consume
+Pres -> Redis : SMEMBERS ws:user:{peer}
+alt есть живые сессии
+  Redis --> Pres : [{node:GW2, device:d1}, ...]
+  Pres -> Redis : PUBLISH gw:GW2
+  Redis -> GW2 : payload + conn_id
+  GW2 -> Peer : WS message.created
+else сессий нет
+  Kafka -> Push : consume
+  Push -> Push : APNs / FCM
+end
 
-rectangle "Внешние системы" {
-  [APNs / FCM] as Push
-  [SMS / Email OTP] as OTP
-  [Object Storage + CDN] as CDN
-}
-
-User --> Sys : сообщения, чаты,\nмедиа, presence
-Admin --> Sys : роли, инвайты
-Sys --> Push : push офлайн
-Sys --> OTP : код входа
-Sys --> CDN : фото и файлы
-
-legend bottom
-  Система — аналог Telegram (MVP).
-  Звонки, каналы и E2EE вне scope.
-endlegend
+note over Redis
+  На WS-connect Gateway пишет
+  HSET ws:user:{id} {device_id} → gw_node
+  TTL обновляет heartbeat.
+  Несколько устройств = несколько записей.
+end note
 @enduml
