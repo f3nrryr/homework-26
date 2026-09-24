@@ -3,8 +3,8 @@
 skinparam shadowing false
 title C4 Container — мессенджер
 legend top
-  сплошная линия = sync (REST / gRPC / WS)
-  пунктир = async (Kafka / RabbitMQ)
+  сплошная = sync (REST / gRPC / WS)
+  пунктир = async (Kafka / Redis pub-sub / RabbitMQ)
 endlegend
 
 actor Client
@@ -24,9 +24,9 @@ rectangle "Сервисы" {
 }
 
 rectangle "Данные" {
-  database "PostgreSQL\nusers / chats / auth" as PG
-  database "Cassandra\nmessages / inbox" as CAS
-  database "Redis\npresence / cache" as Redis
+  database "PostgreSQL\nusers / chats / auth / devices" as PG
+  database "Cassandra\nmessages_by_chat\ninbox_by_user" as CAS
+  database "Redis\nws-sessions / presence\nunread / cache" as Redis
   queue "Kafka" as Kafka
   queue "RabbitMQ\npush retry" as RQ
   cloud "S3 + CDN" as S3
@@ -38,7 +38,8 @@ GW --> Users : gRPC
 GW --> Chats : gRPC
 GW --> Msg : gRPC
 GW --> Media : gRPC
-GW --> Pres : gRPC / WS
+GW --> Pres : gRPC
+GW --> Redis : REGISTER\nuser_id → {gw_node, device_id}
 
 Auth --> PG
 Users --> PG
@@ -50,6 +51,11 @@ Media --> S3 : signed URL
 
 Msg -[#blue,dashed]-> Kafka : MessageSent
 Chats -[#blue,dashed]-> Kafka : MemberChanged
+Kafka -[#blue,dashed]-> Pres : consume
+Pres --> Redis : GET sessions[user_id]
+Pres -[#blue,dashed]-> Redis : PUBLISH gw:{node}
+Redis -[#blue,dashed]-> GW : pub-sub
+GW --> Client : WS message.created
 Kafka -[#blue,dashed]-> Push
 Kafka -[#blue,dashed]-> Chats : last_message
 Push -[#blue,dashed]-> RQ
